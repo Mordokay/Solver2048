@@ -11,6 +11,9 @@ struct CalibrationView: View {
     @State private var topLeft: CGPoint?       // normalized 0-1
     @State private var bottomRight: CGPoint?   // normalized 0-1
     @State private var saved = false
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var panOffset: CGSize = .zero
+    @State private var lastPanOffset: CGSize = .zero
 
     enum TapPhase {
         case selectImage, tapTopLeft, tapBottomRight, done
@@ -52,11 +55,24 @@ struct CalibrationView: View {
                 }
 
                 if screenshotImage != nil {
-                    Button("Reset") {
-                        topLeft = nil; bottomRight = nil
-                        phase = .tapTopLeft; saved = false
+                    HStack(spacing: 16) {
+                        Button("Reset Points") {
+                            topLeft = nil; bottomRight = nil
+                            phase = .tapTopLeft; saved = false
+                        }
+                        .foregroundStyle(.secondary)
+
+                        if zoomScale > 1.05 {
+                            Button("Reset Zoom") {
+                                withAnimation {
+                                    zoomScale = 1.0
+                                    panOffset = .zero
+                                    lastPanOffset = .zero
+                                }
+                            }
+                            .foregroundStyle(.orange)
+                        }
                     }
-                    .foregroundStyle(.secondary)
                 }
             }
             .padding()
@@ -136,21 +152,18 @@ struct CalibrationView: View {
                     Canvas { ctx, size in
                         let dr = imageDisplayRect(imageSize: image.size, in: size)
 
-                        // Draw top-left marker
                         if let tl = topLeft {
                             let pt = toView(tl, in: dr)
                             let circle = CGRect(x: pt.x - 12, y: pt.y - 12, width: 24, height: 24)
                             ctx.stroke(Path(ellipseIn: circle), with: .color(.green), lineWidth: 3)
                             ctx.fill(Path(ellipseIn: circle.insetBy(dx: 8, dy: 8)), with: .color(.green))
                         }
-                        // Draw bottom-right marker
                         if let br = bottomRight {
                             let pt = toView(br, in: dr)
                             let circle = CGRect(x: pt.x - 12, y: pt.y - 12, width: 24, height: 24)
                             ctx.stroke(Path(ellipseIn: circle), with: .color(.red), lineWidth: 3)
                             ctx.fill(Path(ellipseIn: circle.insetBy(dx: 8, dy: 8)), with: .color(.red))
                         }
-                        // Draw board rectangle + grid
                         if let tl = topLeft, let br = bottomRight {
                             let tlPt = toView(tl, in: dr)
                             let brPt = toView(br, in: dr)
@@ -173,10 +186,41 @@ struct CalibrationView: View {
                     }
                     .allowsHitTesting(false)
                 }
+                .scaleEffect(zoomScale, anchor: .center)
+                .offset(panOffset)
                 .gesture(
-                    DragGesture(minimumDistance: 0)
+                    MagnificationGesture()
+                        .onChanged { scale in
+                            zoomScale = max(1.0, min(5.0, scale))
+                        }
+                )
+                .gesture(
+                    DragGesture(minimumDistance: 10)
+                        .onChanged { value in
+                            guard zoomScale > 1.05 else { return }
+                            panOffset = CGSize(
+                                width: lastPanOffset.width + value.translation.width,
+                                height: lastPanOffset.height + value.translation.height
+                            )
+                        }
+                        .onEnded { _ in
+                            lastPanOffset = panOffset
+                        }
+                )
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0, coordinateSpace: .local)
                         .onEnded { value in
-                            handleTap(at: value.location, displayRect: displayRect)
+                            let dragDist = sqrt(pow(value.translation.width, 2) + pow(value.translation.height, 2))
+                            guard dragDist < 8 else { return }
+
+                            let loc = value.startLocation
+                            let centerX = geo.size.width / 2
+                            let centerY = geo.size.height / 2
+                            let origX = (loc.x - centerX - panOffset.width) / zoomScale + centerX
+                            let origY = (loc.y - centerY - panOffset.height) / zoomScale + centerY
+
+                            print("[Calibration] tap=(\(Int(loc.x)),\(Int(loc.y))) orig=(\(Int(origX)),\(Int(origY))) zoom=\(String(format: "%.1f", zoomScale)) pan=(\(Int(panOffset.width)),\(Int(panOffset.height)))")
+                            handleTap(at: CGPoint(x: origX, y: origY), displayRect: displayRect)
                         }
                 )
         }
@@ -211,6 +255,15 @@ struct CalibrationView: View {
         case .tapBottomRight:
             bottomRight = CGPoint(x: normX, y: normY)
             phase = .done
+            // Zoom out after a brief delay so state change settles first
+            Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                withAnimation(.easeOut(duration: 0.4)) {
+                    zoomScale = 1.0
+                    panOffset = .zero
+                    lastPanOffset = .zero
+                }
+            }
         default:
             break
         }

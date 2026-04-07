@@ -1,119 +1,160 @@
 import CoreGraphics
 import UIKit
+import Vision
 
 /// Analyzes screen capture frames to extract the 4x4 board state.
-/// Uses direct RGB pixel comparison — fast and accurate since reference images
-/// are extracted from the actual game board (matching backgrounds).
+/// Uses Apple's Vision framework Neural Engine to generate perceptual embeddings
+/// for each cell, then matches against reference piece embeddings.
+/// This handles any flower design without per-piece tuning.
 enum BoardAnalyzer {
     static let N = 4
-    static let refSize = 48 // resize to 48x48 for comparison
+    static let cellSize = 64 // downscale cells before Vision (faster inference)
+    static var debugLogging = false
 
-    typealias FeatureVector = [Double]
+    // Cache: last known embedding + match per cell position
+    private nonisolated(unsafe) static var cachedMatches: [[Int]] = Array(repeating: Array(repeating: -1, count: 4), count: 4)
+    private nonisolated(unsafe) static var cachedPixelHashes: [[UInt64]] = Array(repeating: Array(repeating: 0, count: 4), count: 4)
 
-    /// Enable verbose logging (set to false after debugging)
-    static var debugLogging = true
+    // MARK: - Vision Feature Print
 
-    // MARK: - Feature Computation (direct RGB average per 4x4 sub-region)
-
-    nonisolated static func computeFeatures(from image: CGImage) -> FeatureVector? {
-        let size = refSize
-        let subGrid = 6 // 6x6 = 108 RGB features — enough to distinguish yellow from red
-        guard let context = CGContext(
-            data: nil, width: size, height: size,
-            bitsPerComponent: 8, bytesPerRow: size * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-
-        context.draw(image, in: CGRect(x: 0, y: 0, width: size, height: size))
-        guard let data = context.data else { return nil }
-        let pixels = data.bindMemory(to: UInt8.self, capacity: size * size * 4)
-
-        let subSize = size / subGrid
-        var features: [Double] = []
-        features.reserveCapacity(subGrid * subGrid * 3)
-
-        for sy in 0..<subGrid {
-            for sx in 0..<subGrid {
-                var r = 0.0, g = 0.0, b = 0.0, count = 0.0
-                for y in (sy * subSize)..<((sy + 1) * subSize) {
-                    for x in (sx * subSize)..<((sx + 1) * subSize) {
-                        let off = (y * size + x) * 4
-                        r += Double(pixels[off])
-                        g += Double(pixels[off + 1])
-                        b += Double(pixels[off + 2])
-                        count += 1
-                    }
-                }
-                features.append(r / count)
-                features.append(g / count)
-                features.append(b / count)
-            }
+    /// Generate a neural feature print for an image using Apple's Vision framework.
+    /// Runs on the Neural Engine — fast, accurate, and perceptually meaningful.
+    nonisolated static func featurePrint(for cgImage: CGImage) -> VNFeaturePrintObservation? {
+        let request = VNGenerateImageFeaturePrintRequest()
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        do {
+            try handler.perform([request])
+            return request.results?.first as? VNFeaturePrintObservation
+        } catch {
+            NSLog("[BoardAnalyzer] Feature print error: %@", error.localizedDescription)
+            return nil
         }
-        return features
+    }
+
+    /// Compute distance between two feature prints. Lower = more similar.
+    nonisolated static func distance(_ a: VNFeaturePrintObservation, _ b: VNFeaturePrintObservation) -> Float {
+        var dist: Float = 0
+        do {
+            try a.computeDistance(&dist, to: b)
+        } catch {
+            return Float.greatestFiniteMagnitude
+        }
+        return dist
     }
 
     // MARK: - Precompute Piece References
 
-    /// Level 0 = empty cell
+    /// Stores serialized feature prints as base64 in SharedState.
     nonisolated static func precomputeAndStoreFeatures(bundle: Bundle = .main) {
-        var features: [Int: [Double]] = [:]
+        var encoded: [Int: [Double]] = [:] // reuse existing SharedState format: store raw bytes as [Double]
 
-        // Load empty cell reference (stored as level 0)
+        // Empty cell
         if let uiImage = UIImage(named: "piece_empty", in: bundle, with: nil),
            let cgImage = uiImage.cgImage,
-           let feat = computeFeatures(from: cgImage) {
-            features[0] = feat
-            NSLog("[BoardAnalyzer] piece_empty loaded (%d features)", feat.count)
+           let fp = featurePrint(for: cgImage),
+           let data = serializeFeaturePrint(fp) {
+            encoded[0] = data
+            NSLog("[BoardAnalyzer] piece_empty loaded (embedding size: %d)", data.count)
         }
 
         for i in 1...20 {
             guard let uiImage = UIImage(named: "piece_\(i)", in: bundle, with: nil),
                   let cgImage = uiImage.cgImage,
-                  let feat = computeFeatures(from: cgImage) else { continue }
-            features[i] = feat
-            NSLog("[BoardAnalyzer] piece_%d loaded (%d features)", i, feat.count)
+                  let fp = featurePrint(for: cgImage),
+                  let data = serializeFeaturePrint(fp) else { continue }
+            encoded[i] = data
+            NSLog("[BoardAnalyzer] piece_%d loaded", i)
         }
-        SharedState.writePieceFeatures(features)
-        NSLog("[BoardAnalyzer] Stored %d piece references (including empty)", features.count)
+        SharedState.writePieceFeatures(encoded)
+        NSLog("[BoardAnalyzer] Stored %d piece references (Neural Engine embeddings)", encoded.count)
     }
 
-    // MARK: - Empty Cell Detection
+    /// Serialize VNFeaturePrintObservation to [Double] for storage.
+    private nonisolated static func serializeFeaturePrint(_ fp: VNFeaturePrintObservation) -> [Double]? {
+        let data = fp.data
+        let count = fp.elementCount
 
-    /// Detect empty cells by checking overall brightness and saturation.
-    /// Empty cells are dark brown (~#4d3b30).
-    private nonisolated static func isCellEmpty(from image: CGImage) -> Bool {
-        let size = 8 // small sample is enough
-        guard let context = CGContext(
+        switch fp.elementType {
+        case .float:
+            let floats = data.withUnsafeBytes { ptr in
+                Array(ptr.bindMemory(to: Float.self).prefix(count))
+            }
+            return floats.map { Double($0) }
+        case .double:
+            return data.withUnsafeBytes { ptr in
+                Array(ptr.bindMemory(to: Double.self).prefix(count))
+            }
+        @unknown default:
+            return nil
+        }
+    }
+
+    /// Deserialize [Double] back to VNFeaturePrintObservation.
+    private nonisolated static func deserializeFeaturePrint(_ doubles: [Double]) -> VNFeaturePrintObservation? {
+        // Create a small dummy image and get its feature print to use as a template
+        // Then overwrite the data — this is a workaround since VNFeaturePrintObservation
+        // can't be directly constructed.
+        // Instead, we'll compare using raw float distance.
+        return nil // We'll use raw distance instead
+    }
+
+    /// Compute Euclidean distance between two serialized feature prints.
+    private nonisolated static func embeddingDistance(_ a: [Double], _ b: [Double]) -> Float {
+        let n = min(a.count, b.count)
+        guard n > 0 else { return Float.greatestFiniteMagnitude }
+        var sum = 0.0
+        for i in 0..<n {
+            let d = a[i] - b[i]
+            sum += d * d
+        }
+        return Float(sqrt(sum))
+    }
+
+    // MARK: - Fast Pixel Hash (detect which cells changed without running Vision)
+
+    /// Quick hash of an image by sampling a few pixels. Different hash = cell changed.
+    nonisolated static func quickHash(of image: CGImage) -> UInt64 {
+        let size = 8 // tiny 8x8 sample
+        guard let ctx = CGContext(
             data: nil, width: size, height: size,
             bitsPerComponent: 8, bytesPerRow: size * 4,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return true }
+        ) else { return 0 }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: size, height: size))
+        guard let data = ctx.data else { return 0 }
+        let bytes = data.bindMemory(to: UInt8.self, capacity: size * size * 4)
 
-        context.draw(image, in: CGRect(x: 0, y: 0, width: size, height: size))
-        guard let data = context.data else { return true }
-        let pixels = data.bindMemory(to: UInt8.self, capacity: size * size * 4)
-
-        var totalR = 0.0, totalG = 0.0, totalB = 0.0
-        let count = Double(size * size)
-        for i in 0..<(size * size) {
-            let off = i * 4
-            totalR += Double(pixels[off])
-            totalG += Double(pixels[off + 1])
-            totalB += Double(pixels[off + 2])
+        // FNV-1a hash of sampled pixels
+        var hash: UInt64 = 14695981039346656037
+        for i in stride(from: 0, to: size * size * 4, by: 4) {
+            hash ^= UInt64(bytes[i])
+            hash &*= 1099511628211
+            hash ^= UInt64(bytes[i + 1])
+            hash &*= 1099511628211
+            hash ^= UInt64(bytes[i + 2])
+            hash &*= 1099511628211
         }
-        let avgR = totalR / count
-        let avgG = totalG / count
-        let avgB = totalB / count
+        return hash
+    }
 
-        let brightness = (avgR + avgG + avgB) / 3.0
-        let maxC = max(avgR, avgG, avgB)
-        let minC = min(avgR, avgG, avgB)
-        let saturation = maxC > 0 ? (maxC - minC) / maxC : 0
+    /// Resize a CGImage to a target size for faster Vision processing.
+    nonisolated static func resize(_ image: CGImage, to size: Int) -> CGImage? {
+        guard let ctx = CGContext(
+            data: nil, width: size, height: size,
+            bitsPerComponent: 8, bytesPerRow: size * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.interpolationQuality = .medium
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: size, height: size))
+        return ctx.makeImage()
+    }
 
-        // Empty cells are dark (brightness < 100) and low saturation
-        return brightness < 100 && saturation < 0.25
+    /// Reset the cache (call when calibration changes).
+    nonisolated static func resetCache() {
+        cachedMatches = Array(repeating: Array(repeating: -1, count: 4), count: 4)
+        cachedPixelHashes = Array(repeating: Array(repeating: 0, count: 4), count: 4)
     }
 
     // MARK: - Board Analysis
@@ -122,7 +163,7 @@ enum BoardAnalyzer {
         frame: CGImage,
         topLeft: CGPoint,
         bottomRight: CGPoint,
-        pieceFeatures: [Int: FeatureVector]
+        pieceFeatures: [Int: [Double]]
     ) -> [[Int]]? {
         let imgW = CGFloat(frame.width)
         let imgH = CGFloat(frame.height)
@@ -141,11 +182,11 @@ enum BoardAnalyzer {
         let cellH = CGFloat(boardImage.height) / CGFloat(N)
 
         var board = Array(repeating: Array(repeating: 0, count: N), count: N)
+        var visionCalls = 0
 
         for r in 0..<N {
             for c in 0..<N {
-                // Crop center 50% of cell to avoid grid borders
-                let inset = 0.25
+                let inset = 0.08
                 let cx = CGFloat(c) * cellW + cellW * inset
                 let cy = CGFloat(r) * cellH + cellH * inset
                 let cw = cellW * (1 - 2 * inset)
@@ -154,8 +195,29 @@ enum BoardAnalyzer {
                 let cellRect = CGRect(x: cx, y: cy, width: cw, height: ch)
                 guard let cellImage = boardImage.cropping(to: cellRect) else { continue }
 
-                board[r][c] = matchCell(cellImage, references: pieceFeatures, row: r, col: c)
+                // Quick hash to check if this cell changed since last frame
+                let hash = quickHash(of: cellImage)
+                if hash == cachedPixelHashes[r][c] && cachedMatches[r][c] >= 0 {
+                    // Cell unchanged — reuse cached result
+                    board[r][c] = cachedMatches[r][c]
+                    continue
+                }
+
+                // Cell changed — resize and run Vision
+                guard let resized = resize(cellImage, to: cellSize),
+                      let cellFP = featurePrint(for: resized),
+                      let cellEmb = serializeFeaturePrint(cellFP) else { continue }
+
+                let match = matchCell(cellEmb, references: pieceFeatures, row: r, col: c)
+                board[r][c] = match
+                cachedMatches[r][c] = match
+                cachedPixelHashes[r][c] = hash
+                visionCalls += 1
             }
+        }
+
+        if debugLogging {
+            NSLog("[BoardAnalyzer] Vision calls: %d/16 (cached: %d)", visionCalls, 16 - visionCalls)
         }
 
         return board
@@ -164,21 +226,16 @@ enum BoardAnalyzer {
     // MARK: - Cell Matching
 
     private nonisolated static func matchCell(
-        _ cellImage: CGImage,
-        references: [Int: FeatureVector],
+        _ cellEmbedding: [Double],
+        references: [Int: [Double]],
         row: Int = -1, col: Int = -1
     ) -> Int {
-        guard let cellFeatures = computeFeatures(from: cellImage) else {
-            if debugLogging { NSLog("[Match] (%d,%d) FAILED to compute features", row, col) }
-            return 0
-        }
-
         var bestMatch = 0
-        var bestDist = Double.infinity
-        var allDists: [(Int, Double)] = []
+        var bestDist: Float = .greatestFiniteMagnitude
+        var allDists: [(Int, Float)] = []
 
-        for (level, refFeatures) in references {
-            let dist = euclideanDistance(cellFeatures, refFeatures)
+        for (level, refEmbedding) in references {
+            let dist = embeddingDistance(cellEmbedding, refEmbedding)
             allDists.append((level, dist))
             if dist < bestDist {
                 bestDist = dist
@@ -188,24 +245,12 @@ enum BoardAnalyzer {
 
         if debugLogging {
             let sorted = allDists.sorted { $0.1 < $1.1 }.prefix(3)
-                .map { "\($0.0 == 0 ? "empty" : "P\($0.0)")=\(String(format: "%.1f", $0.1))" }
+                .map { "\($0.0 == 0 ? "empty" : "P\($0.0)")=\(String(format: "%.2f", $0.1))" }
                 .joined(separator: " ")
             let label = bestMatch == 0 ? "EMPTY" : "→ P\(bestMatch)"
             NSLog("[Match] (%d,%d) top: %@ | %@", row, col, sorted, label)
         }
 
-        // bestMatch 0 = empty cell reference was closest
         return bestMatch
-    }
-
-    /// Root mean square distance between two feature vectors.
-    private nonisolated static func euclideanDistance(_ a: FeatureVector, _ b: FeatureVector) -> Double {
-        var sum = 0.0
-        let n = min(a.count, b.count)
-        for i in 0..<n {
-            let d = a[i] - b[i]
-            sum += d * d
-        }
-        return sqrt(sum / Double(n))
     }
 }
