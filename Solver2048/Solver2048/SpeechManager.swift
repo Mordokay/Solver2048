@@ -103,9 +103,7 @@ final class SpeechManager {
         guard !isSolving else { return }
         isSolving = true
 
-        let depth = SharedState.solverDepth
         let spawnMain = SharedState.spawnMain
-        let safeLevel = SharedState.safeLevel
 
         // Log the detected board
         Self.logBoard(board)
@@ -113,12 +111,12 @@ final class SpeechManager {
         // Run solver on background thread so UI stays responsive
         Task.detached(priority: .userInitiated) { [weak self] in
             let t0 = CFAbsoluteTimeGetCurrent()
-            let results = Solver.findBestMove(board: board, depth: depth, spawnMain: spawnMain, safeLevel: safeLevel)
+            let results = Solver.findBestMove(board: board, spawnMain: spawnMain)
             let elapsed = (CFAbsoluteTimeGetCurrent() - t0) * 1000
 
             // Log solver results
             let scoresStr = results.map { "\($0.direction.rawValue): \(String(format: "%.0f", $0.score))" }.joined(separator: " | ")
-            print("[Solver] depth=\(depth) time=\(String(format: "%.0f", elapsed))ms results: \(scoresStr)")
+            print("[Solver] time=\(String(format: "%.0f", elapsed))ms results: \(scoresStr)")
 
             // Log which moves are actually valid
             for dir in Direction.allCases {

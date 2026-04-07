@@ -19,6 +19,9 @@ struct Solver2048App: App {
             SharedState.solverDepth = 3
         }
 
+        // Initialize C solver lookup tables
+        Solver.initTables()
+
         // Always regenerate piece features on launch (handles code changes & new assets)
         BoardAnalyzer.precomputeAndStoreFeatures()
     }

@@ -6,8 +6,8 @@ struct ContentView: View {
     @State private var isCalibrated = SharedState.isCalibrated
     @State private var solverDepth = SharedState.solverDepth
     @State private var spawnMain = SharedState.spawnMain
-    @State private var safeLevel = SharedState.safeLevel
     @State private var showHelp = false
+    @State private var isSimulating = false
 
     var body: some View {
         NavigationStack {
@@ -17,6 +17,7 @@ struct ContentView: View {
                     broadcastSection
                     calibrationSection
                     settingsSection
+                    simulationSection
                 }
                 .padding()
             }
@@ -202,19 +203,6 @@ struct ContentView: View {
             }
             .onChange(of: spawnMain) { _, v in SharedState.spawnMain = v }
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label("Safety", systemImage: "shield.checkered")
-                    Spacer()
-                    Text(safetyLabel)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(safetyColor)
-                }
-                Slider(value: $safeLevel, in: 0...1)
-                    .tint(safetyColor)
-                    .onChange(of: safeLevel) { _, v in SharedState.safeLevel = (v * 100).rounded() / 100 }
-            }
-
             Toggle(isOn: $speechManager.voiceEnabled) {
                 Label("Voice", systemImage: "speaker.wave.2")
             }
@@ -234,23 +222,44 @@ struct ContentView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 
-    private var safetyLabel: String {
-        switch safeLevel {
-        case 0:        return "Off"
-        case ..<0.3:   return "Aggressive"
-        case ..<0.6:   return "Balanced"
-        case ..<0.85:  return "Cautious"
-        default:       return "Very Safe"
-        }
-    }
+    // MARK: - Simulation
 
-    private var safetyColor: Color {
-        if safeLevel < 0.01 { return .red }
-        return Color(
-            red: 1.0 - safeLevel,
-            green: 0.3 + safeLevel * 0.7,
-            blue: 0.1
-        )
+    @ViewBuilder
+    private var simulationSection: some View {
+        VStack(spacing: 12) {
+            Text("Simulation")
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("Runs automated games across different depth and safety combinations. Check Xcode console for results.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button {
+                guard !isSimulating else { return }
+                isSimulating = true
+                Task.detached(priority: .userInitiated) {
+                    GameSimulator.runAll(spawnMain: SharedState.spawnMain)
+                    await MainActor.run { isSimulating = false }
+                }
+            } label: {
+                HStack {
+                    if isSimulating {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                    }
+                    Text(isSimulating ? "Running..." : "Run Simulations")
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+            .disabled(isSimulating)
+        }
+        .padding(16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 
     private var depthDescription: String {
@@ -354,8 +363,6 @@ struct HelpSheet: View {
                     detail: "How many moves ahead the AI looks. Higher depth = smarter but slower. Depth 6 is recommended for strong play.")
             helpRow(icon: "leaf.fill", title: "Main Spawn",
                     detail: "Which piece spawns 90% of the time in your game. Set this to match your game's most common new tile.")
-            helpRow(icon: "shield.checkered", title: "Safety Slider",
-                    detail: "Controls how conservatively the solver plays. Slide left (red) for aggressive play that risks filling the board, or right (green) for safer play that keeps more empty cells. Adjust mid-game to find your sweet spot.")
         }
     }
 
