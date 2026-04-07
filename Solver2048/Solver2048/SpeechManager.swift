@@ -105,6 +105,7 @@ final class SpeechManager {
 
         let depth = SharedState.solverDepth
         let spawnMain = SharedState.spawnMain
+        let safeLevel = SharedState.safeLevel
 
         // Log the detected board
         Self.logBoard(board)
@@ -112,7 +113,7 @@ final class SpeechManager {
         // Run solver on background thread so UI stays responsive
         Task.detached(priority: .userInitiated) { [weak self] in
             let t0 = CFAbsoluteTimeGetCurrent()
-            let results = Solver.findBestMove(board: board, depth: depth, spawnMain: spawnMain)
+            let results = Solver.findBestMove(board: board, depth: depth, spawnMain: spawnMain, safeLevel: safeLevel)
             let elapsed = (CFAbsoluteTimeGetCurrent() - t0) * 1000
 
             // Log solver results

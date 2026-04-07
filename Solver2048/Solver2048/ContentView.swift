@@ -6,6 +6,8 @@ struct ContentView: View {
     @State private var isCalibrated = SharedState.isCalibrated
     @State private var solverDepth = SharedState.solverDepth
     @State private var spawnMain = SharedState.spawnMain
+    @State private var safeLevel = SharedState.safeLevel
+    @State private var showHelp = false
 
     var body: some View {
         NavigationStack {
@@ -15,11 +17,21 @@ struct ContentView: View {
                     broadcastSection
                     calibrationSection
                     settingsSection
-                    helpSection
                 }
                 .padding()
             }
             .navigationTitle("2048 Solver")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showHelp = true
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.title3)
+                    }
+                    .tint(.orange)
+                }
+            }
             .onAppear {
                 speechManager.startListening()
                 isCalibrated = SharedState.isCalibrated
@@ -29,6 +41,9 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showCalibration) {
                 CalibrationView()
+            }
+            .sheet(isPresented: $showHelp) {
+                HelpSheet()
             }
             .onChange(of: showCalibration) { _, showing in
                 if !showing { isCalibrated = SharedState.isCalibrated }
@@ -187,6 +202,19 @@ struct ContentView: View {
             }
             .onChange(of: spawnMain) { _, v in SharedState.spawnMain = v }
 
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Safety", systemImage: "shield.checkered")
+                    Spacer()
+                    Text(safetyLabel)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(safetyColor)
+                }
+                Slider(value: $safeLevel, in: 0...1)
+                    .tint(safetyColor)
+                    .onChange(of: safeLevel) { _, v in SharedState.safeLevel = (v * 100).rounded() / 100 }
+            }
+
             Toggle(isOn: $speechManager.voiceEnabled) {
                 Label("Voice", systemImage: "speaker.wave.2")
             }
@@ -206,27 +234,23 @@ struct ContentView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 
-    // MARK: - Help
-
-    @ViewBuilder
-    private var helpSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("How to use")
-                .font(.headline)
-
-            VStack(alignment: .leading, spacing: 6) {
-                step(1, "Tap **Calibrate** and import a game screenshot")
-                step(2, "Mark the top-left and bottom-right corners of the board")
-                step(3, "Tap the **broadcast button** and confirm screen recording")
-                step(4, "Switch to your game and play")
-                step(5, "Listen for voice commands: UP, DOWN, LEFT, RIGHT")
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+    private var safetyLabel: String {
+        switch safeLevel {
+        case 0:        return "Off"
+        case ..<0.3:   return "Aggressive"
+        case ..<0.6:   return "Balanced"
+        case ..<0.85:  return "Cautious"
+        default:       return "Very Safe"
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var safetyColor: Color {
+        if safeLevel < 0.01 { return .red }
+        return Color(
+            red: 1.0 - safeLevel,
+            green: 0.3 + safeLevel * 0.7,
+            blue: 0.1
+        )
     }
 
     private var depthDescription: String {
@@ -241,13 +265,161 @@ struct ContentView: View {
         }
     }
 
+}
+
+// MARK: - Help Sheet
+
+struct HelpSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    header
+                    gettingStartedSection
+                    outputMethodsSection
+                    solverSettingsSection
+                    tipsSection
+                }
+                .padding()
+                .padding(.bottom, 20)
+            }
+            .navigationTitle("How It Works")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                        .tint(.orange)
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    // MARK: - Header
+
     @ViewBuilder
-    private func step(_ num: Int, _ text: LocalizedStringKey) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("\(num).")
-                .fontWeight(.bold)
-                .frame(width: 16, alignment: .trailing)
-            Text(text)
+    private var header: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "gamecontroller.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.orange)
+            Text("2048 Solver")
+                .font(.title.bold())
+            Text("Real-time AI that watches your screen and tells you the best move.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
+    }
+
+    // MARK: - Getting Started
+
+    @ViewBuilder
+    private var gettingStartedSection: some View {
+        helpGroup("Getting Started", icon: "play.circle.fill") {
+            helpStep(number: 1, icon: "crop", title: "Calibrate",
+                     detail: "Import a screenshot of your game and tap the top-left and bottom-right corners of the board.")
+            helpStep(number: 2, icon: "record.circle", title: "Start Broadcast",
+                     detail: "Tap the broadcast button and confirm screen recording. This captures your screen in real-time.")
+            helpStep(number: 3, icon: "hand.tap", title: "Play",
+                     detail: "Switch to your game. The solver analyzes each frame and recommends the best swipe direction.")
+        }
+    }
+
+    // MARK: - Output Methods
+
+    @ViewBuilder
+    private var outputMethodsSection: some View {
+        helpGroup("How You Receive Moves", icon: "bell.badge.fill") {
+            helpRow(icon: "speaker.wave.2.fill", title: "Voice",
+                    detail: "Speaks the direction out loud — UP, DOWN, LEFT, RIGHT. Works even when the screen is off.")
+            helpRow(icon: "pip.fill", title: "Floating Arrow (PiP)",
+                    detail: "A small floating window shows a directional arrow on top of any app. Drag it anywhere on screen.")
+            helpRow(icon: "platter.filled.top.and.arrow.up.iphone", title: "Dynamic Island",
+                    detail: "Shows the current direction in the Dynamic Island and on the Lock Screen as a Live Activity.")
+        }
+    }
+
+    // MARK: - Solver Settings
+
+    @ViewBuilder
+    private var solverSettingsSection: some View {
+        helpGroup("Settings Explained", icon: "slider.horizontal.3") {
+            helpRow(icon: "brain.head.profile.fill", title: "Solver Depth",
+                    detail: "How many moves ahead the AI looks. Higher depth = smarter but slower. Depth 6 is recommended for strong play.")
+            helpRow(icon: "leaf.fill", title: "Main Spawn",
+                    detail: "Which piece spawns 90% of the time in your game. Set this to match your game's most common new tile.")
+            helpRow(icon: "shield.checkered", title: "Safety Slider",
+                    detail: "Controls how conservatively the solver plays. Slide left (red) for aggressive play that risks filling the board, or right (green) for safer play that keeps more empty cells. Adjust mid-game to find your sweet spot.")
+        }
+    }
+
+    // MARK: - Tips
+
+    @ViewBuilder
+    private var tipsSection: some View {
+        helpGroup("Tips", icon: "lightbulb.fill") {
+            helpRow(icon: "arrow.counterclockwise", title: "Recalibrate if needed",
+                    detail: "If detection seems off, recalibrate. Make sure the board corners are marked precisely.")
+            helpRow(icon: "bolt.fill", title: "PiP is the fastest output",
+                    detail: "Voice has a small playback delay. For maximum speed, use only the floating arrow with voice turned off.")
+            helpRow(icon: "exclamationmark.triangle.fill", title: "Follow every move",
+                    detail: "The solver plans sequences of moves. Skipping a recommendation can break the planned path and lead to a loss.")
+        }
+    }
+
+    // MARK: - Reusable Components
+
+    @ViewBuilder
+    private func helpGroup<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(title, systemImage: icon)
+                .font(.title3.bold())
+                .foregroundStyle(.orange)
+            content()
+        }
+    }
+
+    @ViewBuilder
+    private func helpStep(number: Int, icon: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(.orange)
+                    .frame(width: 32, height: 32)
+                Text("\(number)")
+                    .font(.callout.bold())
+                    .foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Label(title, systemImage: icon)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func helpRow(icon: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(.orange)
+                .frame(width: 32, alignment: .center)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

@@ -19,6 +19,7 @@ enum SharedState: Sendable {
     private static let kTurboMode = "turboMode"
     private static let kBoardState = "boardState"
     private static let kBoardTimestamp = "boardTimestamp"
+    private static let kSafeMode = "safeMode"
 
     // Darwin notification name
     private static let darwinNotifName = CFNotificationName("com.greenSphereStudios.Solver2048.newDir" as CFString)
@@ -145,6 +146,12 @@ enum SharedState: Sendable {
     nonisolated static var solverDepth: Int {
         get { max(defaults.integer(forKey: kSolverDepth), 2) }
         set { defaults.set(newValue, forKey: kSolverDepth); defaults.synchronize() }
+    }
+
+    /// 0.0 = aggressive (no safety penalty), 1.0 = maximum safety
+    nonisolated static var safeLevel: Double {
+        get { defaults.double(forKey: kSafeMode) }
+        set { defaults.set(newValue, forKey: kSafeMode); defaults.synchronize() }
     }
 
     nonisolated static var spawnMain: Int {

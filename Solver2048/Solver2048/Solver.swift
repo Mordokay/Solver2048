@@ -27,7 +27,8 @@ enum Solver {
     nonisolated static func findBestMove(
         board: Board,
         depth: Int = 3,
-        spawnMain: Int = 1
+        spawnMain: Int = 1,
+        safeLevel: Double = 0
     ) -> [(direction: Direction, score: Double)] {
         var cache: [UInt64: Double] = [:]
         var results: [(direction: Direction, score: Double)] = []
@@ -36,7 +37,7 @@ enum Solver {
             let nb = applyMove(board, dir)
             if equal(board, nb) { continue }
             let score = expectimax(nb, depth: depth - 1, isPlayer: false,
-                                   cache: &cache, prob: 1.0, spawnMain: spawnMain)
+                                   cache: &cache, prob: 1.0, spawnMain: spawnMain, safeLevel: safeLevel)
             results.append((dir, score))
         }
 
@@ -137,7 +138,7 @@ enum Solver {
         return mats
     }()
 
-    nonisolated static func evaluate(_ b: Board) -> Double {
+    nonisolated static func evaluate(_ b: Board, safeLevel: Double = 0) -> Double {
         // 1. Best snake weight across 4 corner orientations
         var best = -Double.infinity
         for W in weightMats {
@@ -172,6 +173,17 @@ enum Solver {
         best += empty * 1e8
         best += merges * 5e7
         best += smooth * 1e7
+
+        // Safety penalty: scale with safeLevel (0 = off, 1 = max)
+        // Threshold scales from 4 (at low safety) to 8 (at max safety)
+        if safeLevel > 0 {
+            let threshold = 4.0 + 4.0 * safeLevel
+            if empty <= threshold {
+                let danger = (threshold - empty) / threshold
+                best -= danger * danger * 5e9 * safeLevel
+            }
+        }
+
         return best
     }
 
@@ -198,9 +210,10 @@ enum Solver {
         isPlayer: Bool,
         cache: inout [UInt64: Double],
         prob: Double,
-        spawnMain: Int
+        spawnMain: Int,
+        safeLevel: Double
     ) -> Double {
-        if depth <= 0 || prob < 0.0001 { return evaluate(b) }
+        if depth <= 0 || prob < 0.0001 { return evaluate(b, safeLevel: safeLevel) }
 
         let key = boardHash(b, depth: depth, isPlayer: isPlayer)
         if let cached = cache[key] { return cached }
@@ -217,15 +230,15 @@ enum Solver {
                 let nb = applyMove(b, dir)
                 if equal(b, nb) { continue }
                 let val = expectimax(nb, depth: depth - 1, isPlayer: false,
-                                     cache: &cache, prob: prob, spawnMain: spawnMain)
+                                     cache: &cache, prob: prob, spawnMain: spawnMain, safeLevel: safeLevel)
                 bestVal = max(bestVal, val)
             }
-            result = bestVal == -Double.infinity ? evaluate(b) : bestVal
+            result = bestVal == -Double.infinity ? evaluate(b, safeLevel: safeLevel) : bestVal
         } else {
             // CHANCE node: average over all random tile placements
             let ec = emptyCells(b)
             if ec.isEmpty {
-                result = evaluate(b)
+                result = evaluate(b, safeLevel: safeLevel)
             } else {
                 let spawnAlt = spawnMain == 1 ? 2 : 1
                 var total = 0.0
@@ -235,7 +248,7 @@ enum Solver {
                         var nb = b
                         nb[r][c] = piece
                         total += p * expectimax(nb, depth: depth - 1, isPlayer: true,
-                                                cache: &cache, prob: cellProb * p, spawnMain: spawnMain)
+                                                cache: &cache, prob: cellProb * p, spawnMain: spawnMain, safeLevel: safeLevel)
                     }
                 }
                 result = total / Double(ec.count)
