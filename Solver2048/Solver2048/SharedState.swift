@@ -16,6 +16,9 @@ enum SharedState: Sendable {
     private static let kExtensionActive = "extensionActive"
     private static let kSolverDepth = "solverDepth"
     private static let kSpawnMain = "spawnMainPiece"
+    private static let kTurboMode = "turboMode"
+    private static let kBoardState = "boardState"
+    private static let kBoardTimestamp = "boardTimestamp"
 
     // Darwin notification name
     private static let darwinNotifName = CFNotificationName("com.greenSphereStudios.Solver2048.newDir" as CFString)
@@ -84,6 +87,40 @@ enum SharedState: Sendable {
         })
     }
 
+    // MARK: - Board State (extension writes, main app reads & solves)
+
+    nonisolated static func writeBoardState(_ board: [[Int]]) {
+        // Encode as flat hex string: "00010302..." (2 hex chars per cell, 32 chars total)
+        var hex = ""
+        hex.reserveCapacity(32)
+        for row in board {
+            for cell in row {
+                hex += String(format: "%02x", cell)
+            }
+        }
+        defaults.set(hex, forKey: kBoardState)
+        defaults.set(Date().timeIntervalSince1970, forKey: kBoardTimestamp)
+        defaults.synchronize()
+        postDarwinNotification()
+    }
+
+    nonisolated static func readBoardState() -> (board: [[Int]], timestamp: Double)? {
+        guard let hex = defaults.string(forKey: kBoardState), hex.count == 32 else { return nil }
+        let ts = defaults.double(forKey: kBoardTimestamp)
+        var board: [[Int]] = []
+        let chars = Array(hex)
+        for r in 0..<4 {
+            var row: [Int] = []
+            for c in 0..<4 {
+                let i = (r * 4 + c) * 2
+                let s = String(chars[i]) + String(chars[i + 1])
+                row.append(Int(s, radix: 16) ?? 0)
+            }
+            board.append(row)
+        }
+        return (board, ts)
+    }
+
     // MARK: - Extension Active State
 
     nonisolated static func writeExtensionActive(_ active: Bool) {
@@ -94,6 +131,13 @@ enum SharedState: Sendable {
 
     nonisolated static var isExtensionActive: Bool {
         defaults.bool(forKey: kExtensionActive)
+    }
+
+    // MARK: - Turbo Mode (PiP only, no voice delays)
+
+    nonisolated static var turboMode: Bool {
+        get { defaults.bool(forKey: kTurboMode) }
+        set { defaults.set(newValue, forKey: kTurboMode); defaults.synchronize() }
     }
 
     // MARK: - Settings

@@ -52,19 +52,26 @@ struct ContentView: View {
                 Spacer()
             }
 
-            // Last direction
-            if !speechManager.lastSpokenDirection.isEmpty {
-                Text(speechManager.lastSpokenDirection)
-                    .font(.system(size: 64, weight: .bold, design: .rounded))
-                    .foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-            } else {
-                Text("---")
-                    .font(.system(size: 48, weight: .medium, design: .rounded))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+            // Last direction (also serves as PiP source view)
+            ZStack {
+                // PiP source view (invisible, but needed for PiP to anchor from)
+                PiPSourceView(pipManager: speechManager.pipManager)
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+
+                if !speechManager.lastSpokenDirection.isEmpty {
+                    Text(speechManager.lastSpokenDirection)
+                        .font(.system(size: 64, weight: .bold, design: .rounded))
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                } else {
+                    Text("---")
+                        .font(.system(size: 48, weight: .medium, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                }
             }
         }
         .padding(20)
@@ -179,6 +186,21 @@ struct ContentView: View {
                 .frame(width: 160)
             }
             .onChange(of: spawnMain) { _, v in SharedState.spawnMain = v }
+
+            Toggle(isOn: $speechManager.voiceEnabled) {
+                Label("Voice", systemImage: "speaker.wave.2")
+            }
+            .tint(.orange)
+
+            Toggle(isOn: $speechManager.pipEnabled) {
+                Label("Floating Arrow (PiP)", systemImage: "pip")
+            }
+            .tint(.orange)
+
+            Toggle(isOn: $speechManager.dynamicIslandEnabled) {
+                Label("Dynamic Island", systemImage: "arrow.up.arrow.down")
+            }
+            .tint(.orange)
         }
         .padding(16)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))

@@ -9,8 +9,8 @@ import ReplayKit
 import CoreImage
 
 /// Broadcast Upload Extension handler.
-/// Receives screen capture frames, analyzes the game board, runs the solver,
-/// and writes the best direction to SharedState for the main app to speak aloud.
+/// Captures screen frames, analyzes the board, and sends the board state to the main app.
+/// The main app runs the solver (no 50MB memory limit → depth 7 works like the browser).
 class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Properties
@@ -20,45 +20,65 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var calibrationBR: CGPoint = .zero
     private var isSetUp = false
 
-    private var lastBoardState: [[Int]] = Solver.newBoard()
-    private var lastSolvedBoard: [[Int]] = Solver.newBoard()
+    private var lastBoardState: [[Int]] = Array(repeating: Array(repeating: 0, count: 4), count: 4)
+    private var lastSentBoard: [[Int]] = Array(repeating: Array(repeating: 0, count: 4), count: 4)
     private var frameCount: Int = 0
-    private var cooldownUntilFrame: Int = 0 // skip frames during animation cooldown
+    private var cooldownUntilFrame: Int = 0
 
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+
+    private static func emptyBoard() -> [[Int]] {
+        Array(repeating: Array(repeating: 0, count: 4), count: 4)
+    }
+
+    private static func boardsEqual(_ a: [[Int]], _ b: [[Int]]) -> Bool {
+        for r in 0..<4 { for c in 0..<4 { if a[r][c] != b[r][c] { return false } } }
+        return true
+    }
+
+    // MARK: - Speed Parameters (read live from SharedState every frame)
+
+    private func skipInterval() -> Int {
+        let depth = SharedState.solverDepth
+        if SharedState.turboMode {
+            // Turbo: analyze as fast as possible
+            return depth <= 3 ? 5 : depth <= 5 ? 8 : 12
+        } else {
+            // Normal: conservative for voice playback timing
+            return depth <= 3 ? 15 : depth <= 5 ? 20 : 30
+        }
+    }
+
+    private func cooldownFrames() -> Int {
+        SharedState.turboMode ? 6 : 21
+    }
 
     // MARK: - Broadcast Lifecycle
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
-        // Load calibration
         guard let cal = SharedState.readCalibration() else {
-            let error = NSError(domain: "Solver2048", code: 1,
-                                userInfo: [NSLocalizedDescriptionKey: "Not calibrated. Open the app and calibrate first."])
-            finishBroadcastWithError(error)
+            finishBroadcastWithError(NSError(domain: "Solver2048", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Not calibrated. Open the app and calibrate first."]))
             return
         }
         calibrationTL = cal.topLeft
         calibrationBR = cal.bottomRight
 
-        // Load precomputed piece features
         guard let features = SharedState.readPieceFeatures(), !features.isEmpty else {
-            let error = NSError(domain: "Solver2048", code: 2,
-                                userInfo: [NSLocalizedDescriptionKey: "Piece references not found. Recalibrate in the app."])
-            finishBroadcastWithError(error)
+            finishBroadcastWithError(NSError(domain: "Solver2048", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Piece references not found. Recalibrate in the app."]))
             return
         }
         pieceFeatures = features
         isSetUp = true
-
         SharedState.writeExtensionActive(true)
     }
 
-    override func broadcastPaused() {
-        // User has requested to pause the broadcast. Samples will stop being delivered.
-    }
+    override func broadcastPaused() {}
 
     override func broadcastResumed() {
         frameCount = 0
+        cooldownUntilFrame = 0
     }
 
     override func broadcastFinished() {
@@ -70,18 +90,9 @@ class SampleHandler: RPBroadcastSampleHandler {
     override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
         guard sampleBufferType == .video, isSetUp else { return }
 
-        // Higher depth = process fewer frames (more time per solve)
-        // Depth 2-3: every 20 frames (~1.5/sec), Depth 5: every 45, Depth 7: every 90
-        let depth = SharedState.solverDepth
-        let skipN = depth <= 3 ? 20 : depth <= 5 ? 45 : 90
-
         frameCount += 1
-
-        // Animation cooldown: after a solve, ignore frames for ~0.7s
-        // to let the score popup (+8, +18) and piece movement animation finish
         guard frameCount >= cooldownUntilFrame else { return }
-
-        guard frameCount % skipN == 0 else { return }
+        guard frameCount % skipInterval() == 0 else { return }
 
         autoreleasepool {
             processFrame(sampleBuffer)
@@ -89,12 +100,10 @@ class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func processFrame(_ sampleBuffer: CMSampleBuffer) {
-        // Convert CMSampleBuffer → CGImage
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else { return }
 
-        // Analyze the board
         guard let board = BoardAnalyzer.analyzeBoard(
             frame: cgImage,
             topLeft: calibrationTL,
@@ -102,37 +111,24 @@ class SampleHandler: RPBroadcastSampleHandler {
             pieceFeatures: pieceFeatures
         ) else { return }
 
-        // If board matches what we last solved, nothing to do
-        guard !Solver.equal(board, lastSolvedBoard) else {
+        // Already sent this exact board
+        guard !Self.boardsEqual(board, lastSentBoard) else {
             lastBoardState = board
             return
         }
 
-        // Board changed — but is it stable? (not mid-animation)
-        // If it also differs from the PREVIOUS frame, the board is still animating. Wait.
-        if !Solver.equal(board, lastBoardState) {
+        // Stability check: must match previous read (not mid-animation)
+        if !Self.boardsEqual(board, lastBoardState) {
             lastBoardState = board
-            return // Come back next eligible frame to see if it settled
+            return
         }
 
-        // Board is the same as the previous read but different from last solve → stable & new.
-        // Check there are any pieces on the board (skip empty boards)
+        // Board is stable and new — send to main app for solving
         let hasPieces = board.contains { row in row.contains { $0 > 0 } }
         guard hasPieces else { return }
 
-        // Run the solver
-        let depth = SharedState.solverDepth
-        let spawnMain = SharedState.spawnMain
-        let results = Solver.findBestMove(board: board, depth: depth, spawnMain: spawnMain)
-
-        if let best = results.first {
-            SharedState.writeDirection(best.direction.rawValue)
-        }
-
-        lastSolvedBoard = board
-
-        // Set cooldown: skip the next ~0.7 seconds of frames (21 frames at 30fps)
-        // so we don't re-read during the next swipe's animation
-        cooldownUntilFrame = frameCount + 21
+        SharedState.writeBoardState(board)
+        lastSentBoard = board
+        cooldownUntilFrame = frameCount + cooldownFrames()
     }
 }
