@@ -62,7 +62,7 @@ final class SpeechManager {
     func setupAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .voiceChat, options: [.mixWithOthers, .duckOthers])
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
         } catch {
             print("[SpeechManager] Audio session error: \(error)")

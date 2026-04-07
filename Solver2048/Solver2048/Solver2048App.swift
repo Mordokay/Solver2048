@@ -8,7 +8,7 @@ struct Solver2048App: App {
         // Set up audio session early so background playback works
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers, .duckOthers])
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
         } catch {
             print("[Solver2048] Audio session setup error: \(error)")
