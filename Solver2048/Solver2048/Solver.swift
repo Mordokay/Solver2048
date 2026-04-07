@@ -29,7 +29,7 @@ enum Solver {
         depth: Int = 3,
         spawnMain: Int = 1
     ) -> [(direction: Direction, score: Double)] {
-        var cache: [String: Double] = [:]
+        var cache: [UInt64: Double] = [:]
         var results: [(direction: Direction, score: Double)] = []
 
         for dir in Direction.allCases {
@@ -106,6 +106,9 @@ enum Solver {
 
     // MARK: - Heuristic Evaluation
 
+    // Precomputed pow(2, n) lookup — cell values are small integers (0..~20)
+    private static let pow2: [Double] = (0...24).map { pow(2.0, Double($0)) }
+
     // Snake weight position indices (zig-zag from top-left corner)
     private static let snakeIdx: [[Int]] = [
         [15, 14, 13, 12],
@@ -141,8 +144,9 @@ enum Solver {
             var s = 0.0
             for r in 0..<N {
                 for c in 0..<N {
-                    if b[r][c] > 0 {
-                        s += pow(2.0, Double(b[r][c])) * W[r][c]
+                    let v = b[r][c]
+                    if v > 0 {
+                        s += pow2[v] * W[r][c]
                     }
                 }
             }
@@ -173,28 +177,32 @@ enum Solver {
 
     // MARK: - Expectimax Search
 
-    private nonisolated static func boardKey(_ b: Board) -> String {
-        var k = ""
-        k.reserveCapacity(32)
+    private nonisolated static func boardHash(_ b: Board, depth: Int, isPlayer: Bool) -> UInt64 {
+        var h: UInt64 = 14695981039346656037 // FNV-1a offset basis
         for r in 0..<N {
             for c in 0..<N {
-                k += String(format: "%02x", b[r][c])
+                h ^= UInt64(b[r][c])
+                h &*= 1099511628211 // FNV-1a prime
             }
         }
-        return k
+        h ^= UInt64(depth) << 5
+        h &*= 1099511628211
+        h ^= isPlayer ? 1 : 0
+        h &*= 1099511628211
+        return h
     }
 
     private nonisolated static func expectimax(
         _ b: Board,
         depth: Int,
         isPlayer: Bool,
-        cache: inout [String: Double],
+        cache: inout [UInt64: Double],
         prob: Double,
         spawnMain: Int
     ) -> Double {
         if depth <= 0 || prob < 0.0001 { return evaluate(b) }
 
-        let key = boardKey(b) + "\(depth)" + (isPlayer ? "P" : "C")
+        let key = boardHash(b, depth: depth, isPlayer: isPlayer)
         if let cached = cache[key] { return cached }
 
         // Stop caching if we're near the memory limit (prevents OOM in extension)
