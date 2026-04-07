@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2048 Flower Solver</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: #1a1210;
+    color: #e8d5b5;
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 20px;
+    user-select: none;
+}
+#app {
+    max-width: 520px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+h1 { font-size: 24px; color: #f0c674; }
+
+/* ── Recommendation Panel ── */
+#recommendation {
+    background: #2d2018;
+    border: 3px solid #5a4232;
+    border-radius: 12px;
+    padding: 16px 30px;
+    text-align: center;
+    width: 100%;
+    min-height: 72px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.3s;
+}
+#recommendation.solved { border-color: #4ade80; }
+#recommendation.thinking { border-color: #f0c674; }
+#rec-direction {
+    font-size: 32px;
+    font-weight: bold;
+    color: #a08060;
+    transition: color 0.2s;
+}
+#rec-scores {
+    font-size: 13px;
+    color: #8a6a4a;
+    margin-top: 4px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+.score-item { white-space: nowrap; }
+.score-item.best { color: #4ade80; font-weight: bold; }
+
+/* ── Board ── */
+#board-container {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+}
+#board {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    background: #3d2e26;
+    border: 4px solid #5a4232;
+    border-radius: 12px;
+    padding: 6px;
+    width: 100%;
+}
+.cell {
+    background: #4d3b30;
+    border: 2px solid #5a4232;
+    border-radius: 8px;
+    aspect-ratio: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.12s;
+    position: relative;
+}
+.cell:hover { border-color: #f0c674; background: #5a4838; }
+.cell.has-piece { background: #5d4a3a; }
+.cell img {
+    width: 82%;
+    height: 82%;
+    object-fit: contain;
+    pointer-events: none;
+}
+.cell .level-badge {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    font-size: 10px;
+    color: #a08060;
+    font-weight: bold;
+}
+/* Mystery piece fallback (no image yet) */
+.cell .mystery-tile {
+    width: 82%;
+    height: 82%;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 20px;
+    color: rgba(255,255,255,0.85);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    pointer-events: none;
+}
+/* Ghost preview on hover */
+.cell.ghost img.ghost-img,
+.cell.ghost .ghost-mystery {
+    opacity: 0.35;
+}
+
+/* ── Piece Selector ── */
+#piece-selector {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+#piece-selector label {
+    font-size: 13px;
+    color: #8a6a4a;
+}
+#pieces {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+.piece-btn {
+    width: 48px;
+    height: 48px;
+    border: 2px solid #5a4232;
+    border-radius: 8px;
+    background: #4d3b30;
+    cursor: pointer;
+    padding: 3px;
+    transition: all 0.12s;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.piece-btn:hover { border-color: #c8a878; background: #5a4838; }
+.piece-btn.selected {
+    border-color: #f0c674;
+    background: #5d4b40;
+    box-shadow: 0 0 10px rgba(240,198,116,0.35);
+}
+.piece-btn img { width: 100%; height: 100%; object-fit: contain; }
+.piece-btn .mystery-thumb {
+    width: 100%;
+    height: 100%;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 14px;
+    color: rgba(255,255,255,0.8);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+.piece-btn .key-hint {
+    position: absolute;
+    bottom: 1px;
+    right: 3px;
+    font-size: 9px;
+    color: #8a6a4a;
+    font-weight: bold;
+}
+
+/* ── Buttons ── */
+#buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+button {
+    padding: 8px 18px;
+    border: 2px solid #5a4232;
+    border-radius: 8px;
+    background: #3d2e26;
+    color: #e8d5b5;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.12s;
+}
+button:hover { border-color: #c8a878; background: #4d3b30; }
+button.primary {
+    background: #4a3828;
+    border-color: #f0c674;
+    color: #f0c674;
+    font-weight: bold;
+    font-size: 16px;
+    padding: 10px 28px;
+}
+button.primary:hover { background: #5a4838; }
+
+/* ── Settings Row ── */
+#settings {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 13px;
+    color: #8a6a4a;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+#settings input[type=range] {
+    width: 80px;
+    accent-color: #f0c674;
+}
+#settings select {
+    background: #3d2e26;
+    border: 1px solid #5a4232;
+    color: #e8d5b5;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 13px;
+}
+
+/* ── Help ── */
+#help {
+    background: #2d2018;
+    border: 1px solid #3d2e26;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 12px;
+    color: #7a5a3a;
+    line-height: 1.7;
+    width: 100%;
+}
+#help b { color: #a08060; }
+kbd {
+    background: #3d2e26;
+    border: 1px solid #5a4232;
+    border-radius: 3px;
+    padding: 0 4px;
+    font-family: monospace;
+    font-size: 11px;
+    color: #e8d5b5;
+}
+
+/* ── Move overlay arrows ── */
+#move-overlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 10;
+}
+#move-overlay.show { display: flex; }
+#move-overlay .arrow {
+    font-size: 120px;
+    color: rgba(74, 222, 128, 0.25);
+    text-shadow: 0 0 40px rgba(74,222,128,0.15);
+    animation: pulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes pulse {
+    from { opacity: 0.6; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1.05); }
+}
+</style>
+</head>
+<body>
+<div id="app">
+    <h1>2048 Flower Solver</h1>
+
+    <div id="recommendation">
+        <div id="rec-direction">Press Space to solve</div>
+        <div id="rec-scores"></div>
+    </div>
+
+    <div id="board-container">
+        <div id="board"></div>
+        <div id="move-overlay"><span class="arrow"></span></div>
+    </div>
+
+    <div id="piece-selector">
+        <label>Selected piece (<kbd>1</kbd>-<kbd>0</kbd> pieces 1-10, <kbd>Q</kbd>-<kbd>P</kbd> pieces 11-20):</label>
+        <div id="pieces"></div>
+    </div>
+
+    <div id="buttons">
+        <button class="primary" id="solve-btn" onclick="solveAndShow()">Solve (Space)</button>
+        <button onclick="applyRecommendedMove()">Apply (Enter)</button>
+        <button onclick="undoMove()">Undo (Z)</button>
+        <button onclick="clearBoard()">Clear</button>
+    </div>
+
+    <div id="settings">
+        <span>Depth: <input type="range" id="depth" min="2" max="7" value="5"><b id="depth-val">5</b></span>
+        <span>Spawn:
+            <select id="spawn-piece">
+                <option value="1" selected>Piece 1 (90%)</option>
+                <option value="2">Piece 2 (90%)</option>
+            </select>
+        </span>
+        <label style="cursor:pointer"><input type="checkbox" id="auto-solve" checked> Auto-solve on place</label>
+    </div>
+
+    <div id="help">
+        <b>Workflow:</b> Set up board &rarr; <kbd>Space</kbd> solve &rarr; swipe in your game &rarr; <kbd>Enter</kbd> apply here &rarr; click where new piece appeared &rarr; repeat<br>
+        <b>Place:</b> <kbd>Left Click</kbd> cell &nbsp; <b>Remove:</b> <kbd>Right Click</kbd> cell<br>
+        <b>Keys:</b> <kbd>1</kbd>-<kbd>0</kbd> pieces 1-10 &bull; <kbd>Q</kbd>-<kbd>P</kbd> pieces 11-20 &bull; <kbd>Space</kbd> solve &bull; <kbd>Enter</kbd> apply &bull; <kbd>Arrows</kbd> apply direction &bull; <kbd>Z</kbd> undo
+    </div>
+</div>
+
+<script>
+// ════════════════════════════════════════
+//  CONSTANTS & STATE
+// ════════════════════════════════════════
+const N = 4;
+const MAX_PIECE = 20;
+const NUM_PIECES = 20; // support up to 20 pieces (10 unlocked + 10 future)
+const DIRS = ['up', 'down', 'left', 'right'];
+const DIR_ARROWS = { up: '\u2191', down: '\u2193', left: '\u2190', right: '\u2192' };
+const DIR_LABELS = { up: 'UP', down: 'DOWN', left: 'LEFT', right: 'RIGHT' };
+
+// Color palette for mystery (unlocked but no image) pieces
+const MYSTERY_COLORS = {
+    11: ['#2dd4bf', '#0d9488'], // teal
+    12: ['#38bdf8', '#0284c7'], // sky blue
+    13: ['#a78bfa', '#7c3aed'], // violet
+    14: ['#f472b6', '#db2777'], // pink
+    15: ['#fb923c', '#ea580c'], // orange
+    16: ['#facc15', '#ca8a04'], // yellow
+    17: ['#4ade80', '#16a34a'], // green
+    18: ['#f87171', '#dc2626'], // red
+    19: ['#e2e8f0', '#94a3b8'], // silver
+    20: ['#fcd34d', '#f59e0b'], // gold
+};
+
+// Track which piece images exist (check on load)
+const pieceImageExists = {};
+function checkPieceImages() {
+    for (let i = 1; i <= NUM_PIECES; i++) {
+        const img = new Image();
+        img.onload = () => { pieceImageExists[i] = true; };
+        img.onerror = () => { pieceImageExists[i] = false; };
+        img.src = `piece_${i}.png`;
+    }
+}
+
+function getMysteryGradient(level) {
+    const colors = MYSTERY_COLORS[level] || ['#6b7280', '#374151'];
+    return `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`;
+}
+
+let board = newBoard();
+let selectedPiece = 1;
+let lastRecommendation = null;
+let history = [];
+const MAX_HISTORY = 50;
+
+function newBoard() {
+    return Array.from({ length: N }, () => Array(N).fill(0));
+}
+function clone(b) { return b.map(r => [...r]); }
+function emptyCells(b) {
+    const out = [];
+    for (let r = 0; r < N; r++)
+        for (let c = 0; c < N; c++)
+            if (b[r][c] === 0) out.push([r, c]);
+    return out;
+}
+function equal(a, b) {
+    for (let r = 0; r < N; r++)
+        for (let c = 0; c < N; c++)
+            if (a[r][c] !== b[r][c]) return false;
+    return true;
+}
+
+// ════════════════════════════════════════
+//  MOVE MECHANICS
+// ════════════════════════════════════════
+function slideRow(row) {
+    const f = row.filter(x => x > 0);
+    for (let i = 0; i < f.length - 1; i++) {
+        if (f[i] === f[i + 1]) {
+            f[i]++;
+            f.splice(i + 1, 1);
+        }
+    }
+    while (f.length < N) f.push(0);
+    return f;
+}
+
+function moveLeft(b) { return b.map(r => slideRow([...r])); }
+function moveRight(b) { return b.map(r => slideRow([...r].reverse()).reverse()); }
+function transpose(b) {
+    const t = newBoard();
+    for (let r = 0; r < N; r++)
+        for (let c = 0; c < N; c++)
+            t[c][r] = b[r][c];
+    return t;
+}
+function moveUp(b) { return transpose(moveLeft(transpose(b))); }
+function moveDown(b) { return transpose(moveRight(transpose(b))); }
+
+function applyMove(b, dir) {
+    switch (dir) {
+        case 'left':  return moveLeft(b);
+        case 'right': return moveRight(b);
+        case 'up':    return moveUp(b);
+        case 'down':  return moveDown(b);
+    }
+}
+
+// ════════════════════════════════════════
+//  HEURISTIC EVALUATION
+// ════════════════════════════════════════
+
+// Snake weight: position indices for a zig-zag pattern
+// 15 14 13 12      Precompute 4^index for each cell.
+//  8  9 10 11      We try all 4 rotations and pick the best,
+//  7  6  5  4      so the AI adapts to whichever corner is strongest.
+//  0  1  2  3
+const SNAKE_IDX = [
+    [15,14,13,12],
+    [ 8, 9,10,11],
+    [ 7, 6, 5, 4],
+    [ 0, 1, 2, 3]
+];
+
+function rot90(m) {
+    const o = newBoard();
+    for (let r = 0; r < N; r++)
+        for (let c = 0; c < N; c++)
+            o[c][N - 1 - r] = m[r][c];
+    return o;
+}
+
+// Precompute 4 rotations of the weight matrix (using actual 4^idx values)
+const WEIGHT_MATS = [];
+{
+    let m = SNAKE_IDX.map(r => r.map(v => Math.pow(4, v)));
+    for (let i = 0; i < 4; i++) {
+        WEIGHT_MATS.push(m);
+        m = rot90(m);
+    }
+}
+
+function evaluate(b) {
+    // 1) Best snake-weight score across 4 orientations
+    let best = -Infinity;
+    for (const W of WEIGHT_MATS) {
+        let s = 0;
+        for (let r = 0; r < N; r++)
+            for (let c = 0; c < N; c++)
+                if (b[r][c] > 0)
+                    s += Math.pow(2, b[r][c]) * W[r][c];
+        if (s > best) best = s;
+    }
+
+    // 2) Empty cell bonus (very important for survival)
+    let empty = 0, merges = 0, smooth = 0;
+    for (let r = 0; r < N; r++) {
+        for (let c = 0; c < N; c++) {
+            if (b[r][c] === 0) { empty++; continue; }
+            // Merge potential
+            if (c < N-1 && b[r][c] === b[r][c+1]) merges++;
+            if (r < N-1 && b[r][c] === b[r+1][c]) merges++;
+            // Smoothness (penalize large gaps between neighbors)
+            if (c < N-1 && b[r][c+1] > 0)
+                smooth -= Math.abs(b[r][c] - b[r][c+1]);
+            if (r < N-1 && b[r+1][c] > 0)
+                smooth -= Math.abs(b[r][c] - b[r+1][c]);
+        }
+    }
+
+    // Scale secondary factors relative to snake weight
+    best += empty * 1e8;
+    best += merges * 5e7;
+    best += smooth * 1e7;
+
+    return best;
+}
+
+// ════════════════════════════════════════
+//  EXPECTIMAX SOLVER
+// ════════════════════════════════════════
+
+function boardKey(b) {
+    // Two-char encoding per cell to support levels 0-20+
+    let k = '';
+    for (let r = 0; r < N; r++)
+        for (let c = 0; c < N; c++)
+            k += (b[r][c] < 16 ? '0' : '') + b[r][c].toString(16);
+    return k;
+}
+
+function expectimax(b, depth, isPlayer, cache, prob) {
+    if (depth <= 0 || prob < 0.0001) return evaluate(b);
+
+    const key = boardKey(b) + depth + (isPlayer ? 'P' : 'C');
+    const cached = cache.get(key);
+    if (cached !== undefined) return cached;
+
+    let result;
+
+    if (isPlayer) {
+        // MAX node: pick the best move
+        let bestVal = -Infinity;
+        for (const dir of DIRS) {
+            const nb = applyMove(b, dir);
+            if (equal(b, nb)) continue;
+            const val = expectimax(nb, depth - 1, false, cache, prob);
+            if (val > bestVal) bestVal = val;
+        }
+        result = bestVal === -Infinity ? evaluate(b) : bestVal;
+    } else {
+        // CHANCE node: average over all possible random tile placements
+        const ec = emptyCells(b);
+        if (ec.length === 0) { result = evaluate(b); }
+        else {
+            const spawnMain = parseInt(document.getElementById('spawn-piece').value) || 1;
+            const spawnAlt = spawnMain === 1 ? 2 : 1;
+            let total = 0;
+            const cellProb = prob / ec.length;
+            for (const [r, c] of ec) {
+                // 90% main spawn, 10% alt spawn
+                for (const [piece, p] of [[spawnMain, 0.9], [spawnAlt, 0.1]]) {
+                    const nb = clone(b);
+                    nb[r][c] = piece;
+                    total += p * expectimax(nb, depth - 1, true, cache, cellProb * p);
+                }
+            }
+            result = total / ec.length;
+        }
+    }
+
+    cache.set(key, result);
+    return result;
+}
+
+function findBestMove(b, depth) {
+    const cache = new Map();
+    const results = [];
+    const spawnMain = parseInt(document.getElementById('spawn-piece').value) || 1;
+
+    for (const dir of DIRS) {
+        const nb = applyMove(b, dir);
+        if (equal(b, nb)) continue;
+        const score = expectimax(nb, depth - 1, false, cache, 1.0);
+        results.push({ dir, score });
+    }
+
+    results.sort((a, b) => b.score - a.score);
+    return results;
+}
+
+// ════════════════════════════════════════
+//  UI RENDERING
+// ════════════════════════════════════════
+
+function createPieceElement(level, cssClass) {
+    if (pieceImageExists[level]) {
+        const img = document.createElement('img');
+        img.src = `piece_${level}.png`;
+        img.draggable = false;
+        if (cssClass) img.className = cssClass;
+        return img;
+    }
+    // Mystery piece fallback
+    const div = document.createElement('div');
+    div.className = cssClass ? `mystery-tile ${cssClass}` : 'mystery-tile';
+    div.style.background = getMysteryGradient(level);
+    div.textContent = `?${level}`;
+    return div;
+}
+
+function renderBoard() {
+    const el = document.getElementById('board');
+    el.innerHTML = '';
+    for (let r = 0; r < N; r++) {
+        for (let c = 0; c < N; c++) {
+            const cell = document.createElement('div');
+            cell.className = 'cell' + (board[r][c] > 0 ? ' has-piece' : '');
+
+            if (board[r][c] > 0) {
+                cell.appendChild(createPieceElement(board[r][c]));
+                const badge = document.createElement('span');
+                badge.className = 'level-badge';
+                badge.textContent = board[r][c];
+                cell.appendChild(badge);
+            }
+
+            // Left click: place piece (+ auto-solve if enabled)
+            cell.addEventListener('click', () => {
+                pushHistory();
+                board[r][c] = selectedPiece;
+                renderBoard(); saveState();
+                if (document.getElementById('auto-solve').checked) {
+                    solveAndShow();
+                }
+            });
+            // Right click: remove piece
+            cell.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                pushHistory();
+                board[r][c] = 0;
+                renderBoard(); saveState();
+            });
+            // Hover preview
+            cell.addEventListener('mouseenter', () => {
+                if (board[r][c] === 0) {
+                    const ghost = createPieceElement(selectedPiece, 'ghost-img');
+                    ghost.style.opacity = '0.3';
+                    ghost.style.width = '82%';
+                    ghost.style.height = '82%';
+                    ghost.style.pointerEvents = 'none';
+                    if (ghost.tagName === 'IMG') ghost.style.objectFit = 'contain';
+                    cell.appendChild(ghost);
+                    cell.classList.add('ghost');
+                }
+            });
+            cell.addEventListener('mouseleave', () => {
+                const g = cell.querySelector('.ghost-img');
+                if (g) g.remove();
+                cell.classList.remove('ghost');
+            });
+
+            el.appendChild(cell);
+        }
+    }
+}
+
+// Key hints: 1-9, 0 for 1-10, then Q-T for 11-15, Y-P for 16-20
+const KEY_HINTS = {
+    1:'1', 2:'2', 3:'3', 4:'4', 5:'5', 6:'6', 7:'7', 8:'8', 9:'9', 10:'0',
+    11:'Q', 12:'W', 13:'E', 14:'R', 15:'T', 16:'Y', 17:'U', 18:'I', 19:'O', 20:'P'
+};
+
+function renderPieces() {
+    const el = document.getElementById('pieces');
+    el.innerHTML = '';
+    for (let i = 1; i <= NUM_PIECES; i++) {
+        const btn = document.createElement('div');
+        btn.className = 'piece-btn' + (i === selectedPiece ? ' selected' : '');
+
+        if (pieceImageExists[i]) {
+            const img = document.createElement('img');
+            img.src = `piece_${i}.png`;
+            img.draggable = false;
+            btn.appendChild(img);
+        } else {
+            const mystery = document.createElement('div');
+            mystery.className = 'mystery-thumb';
+            mystery.style.background = getMysteryGradient(i);
+            mystery.textContent = `?${i}`;
+            btn.appendChild(mystery);
+        }
+
+        const hint = document.createElement('span');
+        hint.className = 'key-hint';
+        hint.textContent = KEY_HINTS[i] || '';
+        btn.appendChild(hint);
+        btn.addEventListener('click', () => { selectedPiece = i; renderPieces(); saveState(); });
+        el.appendChild(btn);
+    }
+}
+
+function pushHistory() {
+    history.push(clone(board));
+    if (history.length > MAX_HISTORY) history.shift();
+}
+
+function saveState() {
+    localStorage.setItem('2048solver_board', JSON.stringify(board));
+    localStorage.setItem('2048solver_selectedPiece', selectedPiece);
+}
+
+function loadState() {
+    try {
+        const saved = localStorage.getItem('2048solver_board');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length === N) {
+                board = parsed;
+            }
+        }
+        const sp = localStorage.getItem('2048solver_selectedPiece');
+        if (sp) selectedPiece = parseInt(sp) || 1;
+    } catch (_) {}
+}
+
+// ════════════════════════════════════════
+//  ACTIONS
+// ════════════════════════════════════════
+
+async function solveAndShow() {
+    const recEl = document.getElementById('recommendation');
+    const dirEl = document.getElementById('rec-direction');
+    const scoresEl = document.getElementById('rec-scores');
+    const overlay = document.getElementById('move-overlay');
+
+    // Show thinking state
+    recEl.className = 'thinking';
+    dirEl.textContent = 'Solving...';
+    dirEl.style.color = '#f0c674';
+    scoresEl.innerHTML = '';
+    overlay.classList.remove('show');
+    document.getElementById('solve-btn').disabled = true;
+
+    // Yield to let UI update
+    await new Promise(r => setTimeout(r, 15));
+
+    const depth = parseInt(document.getElementById('depth').value);
+    const t0 = performance.now();
+    const results = findBestMove(board, depth);
+    const elapsed = performance.now() - t0;
+
+    document.getElementById('solve-btn').disabled = false;
+
+    if (results.length === 0) {
+        recEl.className = '';
+        dirEl.textContent = 'NO VALID MOVES';
+        dirEl.style.color = '#ff6b6b';
+        scoresEl.innerHTML = '<span style="color:#ff6b6b">Game over?</span>';
+        lastRecommendation = null;
+        return;
+    }
+
+    const best = results[0];
+    lastRecommendation = best.dir;
+
+    // Show recommendation
+    recEl.className = 'solved';
+    dirEl.textContent = `${DIR_ARROWS[best.dir]}  SWIPE ${DIR_LABELS[best.dir]}`;
+    dirEl.style.color = '#4ade80';
+
+    // Show all move scores as relative percentages
+    const maxScore = best.score;
+    scoresEl.innerHTML = results.map((r, i) =>
+        `<span class="score-item${i === 0 ? ' best' : ''}">${DIR_ARROWS[r.dir]} ${DIR_LABELS[r.dir]}: ${(r.score / maxScore * 100).toFixed(0)}%</span>`
+    ).join('') + `<span class="score-item" style="color:#5a4232">(${elapsed.toFixed(0)}ms)</span>`;
+
+    // Show overlay arrow
+    const arrowEl = overlay.querySelector('.arrow');
+    arrowEl.textContent = DIR_ARROWS[best.dir];
+    overlay.classList.add('show');
+}
+
+function applyDirection(dir) {
+    const nb = applyMove(board, dir);
+    if (!equal(board, nb)) {
+        pushHistory();
+        board = nb;
+        lastRecommendation = null;
+        renderBoard(); saveState();
+        // Update recommendation display
+        const recEl = document.getElementById('recommendation');
+        const dirEl = document.getElementById('rec-direction');
+        const scoresEl = document.getElementById('rec-scores');
+        recEl.className = '';
+        dirEl.textContent = 'Place new piece, then Space';
+        dirEl.style.color = '#a08060';
+        scoresEl.innerHTML = '';
+        document.getElementById('move-overlay').classList.remove('show');
+    }
+}
+
+function applyRecommendedMove() {
+    if (lastRecommendation) applyDirection(lastRecommendation);
+}
+
+function undoMove() {
+    if (history.length > 0) {
+        board = history.pop();
+        renderBoard(); saveState();
+    }
+}
+
+function clearBoard() {
+    pushHistory();
+    board = newBoard();
+    lastRecommendation = null;
+    renderBoard(); saveState();
+    document.getElementById('rec-direction').textContent = 'Board cleared';
+    document.getElementById('rec-direction').style.color = '#a08060';
+    document.getElementById('rec-scores').innerHTML = '';
+    document.getElementById('move-overlay').classList.remove('show');
+    document.getElementById('recommendation').className = '';
+}
+
+// ════════════════════════════════════════
+//  KEYBOARD SHORTCUTS
+// ════════════════════════════════════════
+document.addEventListener('keydown', (e) => {
+    // Don't capture if user is in an input/select
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+    switch (e.key) {
+        case ' ':
+            e.preventDefault();
+            solveAndShow();
+            break;
+        case 'Enter': case 'x': case 'X':
+            e.preventDefault();
+            applyRecommendedMove();
+            break;
+        case 'z': case 'Z':
+            if (!e.ctrlKey && !e.metaKey) { e.preventDefault(); undoMove(); }
+            break;
+        case 'ArrowLeft':  e.preventDefault(); applyDirection('left');  break;
+        case 'ArrowRight': e.preventDefault(); applyDirection('right'); break;
+        case 'ArrowUp':    e.preventDefault(); applyDirection('up');    break;
+        case 'ArrowDown':  e.preventDefault(); applyDirection('down');  break;
+        default: {
+            // 1-9 → pieces 1-9, 0 → piece 10
+            if (e.key >= '1' && e.key <= '9') {
+                selectedPiece = parseInt(e.key);
+                renderPieces();
+            } else if (e.key === '0') {
+                selectedPiece = 10;
+                renderPieces();
+            }
+            // Q-P → pieces 11-20
+            const qRow = { q:11, w:12, e:13, r:14, t:15, y:16, u:17, i:18, o:19, p:20 };
+            const mapped = qRow[e.key.toLowerCase()];
+            if (mapped) { selectedPiece = mapped; renderPieces(); }
+        }
+    }
+});
+
+// Depth slider
+document.getElementById('depth').addEventListener('input', (e) => {
+    document.getElementById('depth-val').textContent = e.target.value;
+});
+
+// ════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════
+checkPieceImages();
+loadState();
+// Small delay to let image checks resolve, then render
+setTimeout(() => { renderBoard(); renderPieces(); }, 100);
+</script>
+</body>
+</html>
