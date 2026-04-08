@@ -1,10 +1,8 @@
 # Xcode
 build/
 DerivedData/
-*.xcodeproj/xcuserdata/
-*.xcworkspace/xcuserdata/
-*.xcodeproj/project.xcworkspace/xcuserdata/
-xcuserdata/
+**/xcuserdata/
+*.xcuserstate
 *.pbxuser
 *.mode1v3
 *.mode2v3
