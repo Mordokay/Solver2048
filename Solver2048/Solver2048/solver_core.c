@@ -9,6 +9,7 @@
 
 #include "solver_core.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -52,6 +53,7 @@ static inline board_t transpose(board_t x) {
 }
 
 int solver_count_empty(board_t x) {
+    if (x == 0) return 16;
     x |= (x >> 2) & 0x3333333333333333ULL;
     x |= (x >> 1);
     x = ~x & 0x1111111111111111ULL;
@@ -384,27 +386,37 @@ float solver_score_move(board_t board, int move, int spawn_main) {
     return res;
 }
 
-int solver_find_best_move(board_t board, int spawn_main) {
-    eval_state_t state;
-    memset(&state, 0, sizeof(state));
-    trans_table_init(&state.trans_table);
+/* Persistent state for real-time play (avoids alloc/free per move) */
+static eval_state_t *persistent_state = NULL;
 
-    state.depth_limit = MAX(3, count_distinct_tiles(board) - 2);
-    state.spawn_main = (spawn_main >= 1 && spawn_main <= 2) ? spawn_main : 1;
-    state.spawn_alt = (state.spawn_main == 1) ? 2 : 1;
+int solver_find_best_move(board_t board, int spawn_main) {
+    /* Lazy-init persistent state */
+    if (!persistent_state) {
+        persistent_state = (eval_state_t *)calloc(1, sizeof(eval_state_t));
+        trans_table_init(&persistent_state->trans_table);
+    }
+
+    /* Clear table for new search (much faster than free+calloc) */
+    memset(persistent_state->trans_table.entries, 0,
+           TRANS_TABLE_SIZE * sizeof(trans_entry_t));
+
+    persistent_state->maxdepth = 0;
+    persistent_state->curdepth = 0;
+    persistent_state->depth_limit = MAX(3, count_distinct_tiles(board) - 2);
+    persistent_state->spawn_main = (spawn_main >= 1 && spawn_main <= 2) ? spawn_main : 1;
+    persistent_state->spawn_alt = (persistent_state->spawn_main == 1) ? 2 : 1;
 
     float best = 0;
     int bestmove = -1;
 
     for (int move = 0; move < 4; move++) {
-        float res = score_toplevel_move(&state, board, move);
+        float res = score_toplevel_move(persistent_state, board, move);
         if (res > best) {
             best = res;
             bestmove = move;
         }
     }
 
-    trans_table_free(&state.trans_table);
     return bestmove;
 }
 
@@ -429,4 +441,96 @@ void solver_unpack_board(board_t board, int board_arr[4][4]) {
             board_arr[r][c] = (int)((board >> (4 * (4 * r + c))) & 0xf);
         }
     }
+}
+
+/* ── Full game simulation in C (no Swift overhead) ── */
+
+static inline board_t insert_random_tile(board_t board, int spawn_main, int spawn_alt) {
+    int num_open = solver_count_empty(board);
+    if (num_open == 0) return board;
+
+    int target = arc4random_uniform(num_open);
+    int tile_val = (arc4random_uniform(10) < 9) ? spawn_main : spawn_alt;
+
+    board_t tmp = board;
+    board_t tile_bit = 1;
+    int idx = 0;
+    while (tile_bit) {
+        if ((tmp & 0xf) == 0) {
+            if (idx == target) {
+                return board | ((board_t)tile_val * tile_bit);
+            }
+            idx++;
+        }
+        tmp >>= 4;
+        tile_bit <<= 4;
+    }
+    return board; /* shouldn't reach here */
+}
+
+static int get_max_rank(board_t board) {
+    int maxrank = 0;
+    while (board) {
+        int r = (int)(board & 0xf);
+        if (r > maxrank) maxrank = r;
+        board >>= 4;
+    }
+    return maxrank;
+}
+
+int solver_simulate_game(int spawn_main, int *result_moves) {
+    int sp_main = (spawn_main >= 1 && spawn_main <= 2) ? spawn_main : 1;
+    int sp_alt = (sp_main == 1) ? 2 : 1;
+
+    /* Start with empty board + 2 tiles */
+    board_t board = 0;
+    board = insert_random_tile(board, sp_main, sp_alt);
+    board = insert_random_tile(board, sp_main, sp_alt);
+
+    /* Allocate trans table ONCE, reuse across all moves */
+    eval_state_t state;
+    memset(&state, 0, sizeof(state));
+    trans_table_init(&state.trans_table);
+    state.spawn_main = sp_main;
+    state.spawn_alt = sp_alt;
+
+    int moves = 0;
+
+    while (1) {
+        /* Clear trans table for new search (memset is much faster than free+calloc) */
+        memset(state.trans_table.entries, 0,
+               TRANS_TABLE_SIZE * sizeof(trans_entry_t));
+        state.maxdepth = 0;
+        state.curdepth = 0;
+        state.depth_limit = MAX(3, count_distinct_tiles(board) - 2);
+
+        /* Find best move */
+        float best_score = 0;
+        int best_move = -1;
+        for (int move = 0; move < 4; move++) {
+            float res = score_toplevel_move(&state, board, move);
+            if (res > best_score) {
+                best_score = res;
+                best_move = move;
+            }
+        }
+
+        if (best_move < 0) break; /* no valid moves — game over */
+
+        board = solver_execute_move(best_move, board);
+        board = insert_random_tile(board, sp_main, sp_alt);
+        moves++;
+
+        if (moves % 100 == 0) {
+            static const char *dirs[] = {"UP", "DOWN", "LEFT", "RIGHT"};
+            printf("  [move %d] maxTile=P%d empty=%d dir=%s\n",
+                   moves, get_max_rank(board), solver_count_empty(board),
+                   dirs[best_move]);
+        }
+    }
+
+    trans_table_free(&state.trans_table);
+
+    if (result_moves) *result_moves = moves;
+    return get_max_rank(board);
 }

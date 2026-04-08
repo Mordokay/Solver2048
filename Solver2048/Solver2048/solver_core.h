@@ -27,4 +27,8 @@ board_t solver_pack_board(const int board_arr[4][4]);
 /// Unpack a board_t into a 4x4 int array.
 void solver_unpack_board(board_t board, int board_arr[4][4]);
 
+/// Simulate a complete game in C. Returns max tile reached.
+/// result_moves: if non-NULL, receives the total number of moves played.
+int solver_simulate_game(int spawn_main, int *result_moves);
+
 #endif
