@@ -21,6 +21,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var isSetUp = false
 
     private var lastBoardState: [[Int]] = Array(repeating: Array(repeating: 0, count: 4), count: 4)
+    private var prevBoardState: [[Int]] = Array(repeating: Array(repeating: 0, count: 4), count: 4)
     private var lastSentBoard: [[Int]] = Array(repeating: Array(repeating: 0, count: 4), count: 4)
     private var frameCount: Int = 0
     private var cooldownUntilFrame: Int = 0
@@ -107,12 +108,15 @@ class SampleHandler: RPBroadcastSampleHandler {
 
         // Already sent this exact board
         guard !Self.boardsEqual(board, lastSentBoard) else {
+            prevBoardState = lastBoardState
             lastBoardState = board
             return
         }
 
-        // Stability check: must match previous read (not mid-animation)
-        if !Self.boardsEqual(board, lastBoardState) {
+        // Stability check: must match TWO previous consecutive reads (3 total)
+        // to filter out Vision misreads and mid-animation artifacts
+        if !Self.boardsEqual(board, lastBoardState) || !Self.boardsEqual(board, prevBoardState) {
+            prevBoardState = lastBoardState
             lastBoardState = board
             return
         }

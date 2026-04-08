@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var isCalibrated = SharedState.isCalibrated
     @State private var spawnMain = SharedState.spawnMain
     @State private var showHelp = false
+    @State private var showPieceManager = false
     @State private var isSimulating = false
 
     var body: some View {
@@ -45,8 +46,19 @@ struct ContentView: View {
             .sheet(isPresented: $showHelp) {
                 HelpSheet()
             }
+            .sheet(isPresented: $showPieceManager) {
+                PieceManagerView()
+            }
             .onChange(of: showCalibration) { _, showing in
                 if !showing { isCalibrated = SharedState.isCalibrated }
+            }
+            .onChange(of: showPieceManager) { _, showing in
+                if !showing {
+                    // Recompute embeddings from updated piece images
+                    Task.detached(priority: .userInitiated) {
+                        BoardAnalyzer.precomputeAndStoreFeatures()
+                    }
+                }
             }
         }
     }
@@ -158,6 +170,15 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
             }
+
+            Button {
+                showPieceManager = true
+            } label: {
+                Label("Piece Library", systemImage: "square.grid.3x3")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(.orange)
         }
         .padding(16)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))

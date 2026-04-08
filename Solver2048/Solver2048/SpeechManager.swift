@@ -13,6 +13,8 @@ final class SpeechManager {
     private var lastSolvedBoard: [[Int]] = Solver.newBoard()
     private var currentActivity: Activity<SolverActivityAttributes>?
     private var isSolving = false
+    private var debounceTask: Task<Void, Never>?
+    private var pendingBoard: [[Int]]?
 
     var voiceEnabled: Bool = UserDefaults.standard.object(forKey: "voiceEnabled") as? Bool ?? false {
         didSet { UserDefaults.standard.set(voiceEnabled, forKey: "voiceEnabled"); syncSettings() }
@@ -215,16 +217,22 @@ final class SpeechManager {
     private func checkForNewBoard() {
         isExtensionActive = SharedState.isExtensionActive
 
-        guard let (board, timestamp) = SharedState.readBoardState() else {
-            // Uncomment to debug: print("[Main] No board state in SharedState")
-            return
-        }
+        guard let (board, timestamp) = SharedState.readBoardState() else { return }
         guard timestamp > lastBoardTimestamp else { return }
         guard !Solver.equal(board, lastSolvedBoard) else { return }
 
-        print("[Main] New board received at \(String(format: "%.2f", timestamp))")
         lastBoardTimestamp = timestamp
-        lastSolvedBoard = board
-        solveAndAnnounce(board)
+        pendingBoard = board
+
+        // Debounce: wait 150ms for the board to stabilize before solving.
+        // If another board arrives during the wait, the timer resets.
+        debounceTask?.cancel()
+        debounceTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled, let board = pendingBoard else { return }
+            guard !Solver.equal(board, lastSolvedBoard) else { return }
+            lastSolvedBoard = board
+            solveAndAnnounce(board)
+        }
     }
 }

@@ -44,33 +44,56 @@ enum BoardAnalyzer {
 
     // MARK: - Precompute Piece References
 
-    /// Stores serialized feature prints as base64 in SharedState.
+    /// Directory for user-uploaded piece images (in App Group, accessible by both app and extension).
+    nonisolated static var pieceImageDir: URL {
+        let groupDir = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: SharedState.appGroupID)!
+        let dir = groupDir.appendingPathComponent("PieceImages", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Load a user-uploaded piece image from disk. Returns nil if not uploaded.
+    nonisolated static func loadUserPieceImage(slot: Int) -> UIImage? {
+        let url = pieceImageDir.appendingPathComponent("piece_\(slot).jpg")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return UIImage(data: data)
+    }
+
+    /// Loads piece images and computes Vision embeddings.
+    /// Priority: user-uploaded images > asset catalog fallback.
     nonisolated static func precomputeAndStoreFeatures(bundle: Bundle = .main) {
-        var encoded: [Int: [Double]] = [:] // reuse existing SharedState format: store raw bytes as [Double]
+        var encoded: [Int: [Double]] = [:]
 
-        // Empty cell
-        if let uiImage = UIImage(named: "piece_empty", in: bundle, with: nil),
-           let cgImage = uiImage.cgImage,
-           let fp = featurePrint(for: cgImage),
-           let data = serializeFeaturePrint(fp) {
-            encoded[0] = data
-            NSLog("[BoardAnalyzer] piece_empty loaded (embedding size: %d)", data.count)
-        }
+        for slot in [0] + Array(1...17) {
+            // Try user-uploaded image first
+            var uiImage: UIImage? = loadUserPieceImage(slot: slot)
+            let source: String
 
-        for i in 1...20 {
-            guard let uiImage = UIImage(named: "piece_\(i)", in: bundle, with: nil),
-                  let cgImage = uiImage.cgImage,
+            if uiImage != nil {
+                source = "user"
+            } else {
+                // Fallback to asset catalog
+                let assetName = slot == 0 ? "piece_empty" : "piece_\(slot)"
+                uiImage = UIImage(named: assetName, in: bundle, with: nil)
+                source = "asset"
+            }
+
+            guard let image = uiImage,
+                  let cgImage = image.cgImage,
                   let fp = featurePrint(for: cgImage),
                   let data = serializeFeaturePrint(fp) else { continue }
-            encoded[i] = data
-            NSLog("[BoardAnalyzer] piece_%d loaded", i)
+            encoded[slot] = data
+            let label = slot == 0 ? "empty" : "piece_\(slot)"
+            NSLog("[BoardAnalyzer] %@ loaded from %@ (%d floats)", label, source, data.count)
         }
+
         SharedState.writePieceFeatures(encoded)
         NSLog("[BoardAnalyzer] Stored %d piece references (Neural Engine embeddings)", encoded.count)
     }
 
     /// Serialize VNFeaturePrintObservation to [Double] for storage.
-    private nonisolated static func serializeFeaturePrint(_ fp: VNFeaturePrintObservation) -> [Double]? {
+    nonisolated static func serializeFeaturePrint(_ fp: VNFeaturePrintObservation) -> [Double]? {
         let data = fp.data
         let count = fp.elementCount
 
