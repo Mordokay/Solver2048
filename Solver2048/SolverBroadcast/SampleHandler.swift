@@ -39,14 +39,8 @@ class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - Speed Parameters (read live from SharedState every frame)
 
     private func skipInterval() -> Int {
-        let depth = SharedState.solverDepth
-        if SharedState.turboMode {
-            // Turbo: analyze as fast as possible
-            return depth <= 3 ? 5 : depth <= 5 ? 8 : 12
-        } else {
-            // Normal: conservative for voice playback timing
-            return depth <= 3 ? 15 : depth <= 5 ? 20 : 30
-        }
+        // Turbo: analyze as fast as possible; Normal: conservative for voice playback
+        return SharedState.turboMode ? 5 : 15
     }
 
     private func cooldownFrames() -> Int {

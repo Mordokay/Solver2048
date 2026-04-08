@@ -3,7 +3,7 @@ import ActivityKit
 
 /// Manages direction announcements via voice (MP3), Dynamic Island, and/or floating PiP arrow.
 /// Receives board state from the broadcast extension and runs the solver in the main app process
-/// (no memory limit → depth 7 works as fast as the browser version).
+/// (no memory limit → C solver with adaptive depth runs at full speed).
 @Observable
 @MainActor
 final class SpeechManager {

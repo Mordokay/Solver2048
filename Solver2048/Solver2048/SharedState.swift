@@ -14,7 +14,6 @@ enum SharedState: Sendable {
     private static let kCalibrationBRY = "calBRY"
     private static let kPieceFeatures = "pieceFeatures"
     private static let kExtensionActive = "extensionActive"
-    private static let kSolverDepth = "solverDepth"
     private static let kSpawnMain = "spawnMainPiece"
     private static let kTurboMode = "turboMode"
     private static let kBoardState = "boardState"
@@ -141,11 +140,6 @@ enum SharedState: Sendable {
     }
 
     // MARK: - Settings
-
-    nonisolated static var solverDepth: Int {
-        get { max(defaults.integer(forKey: kSolverDepth), 2) }
-        set { defaults.set(newValue, forKey: kSolverDepth); defaults.synchronize() }
-    }
 
     nonisolated static var spawnMain: Int {
         get {

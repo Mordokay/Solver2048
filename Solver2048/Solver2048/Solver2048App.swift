@@ -14,11 +14,6 @@ struct Solver2048App: App {
             print("[Solver2048] Audio session setup error: \(error)")
         }
 
-        // Initialize solver depth default if not set
-        if SharedState.defaults.integer(forKey: "solverDepth") == 0 {
-            SharedState.solverDepth = 3
-        }
-
         // Initialize C solver lookup tables
         Solver.initTables()
 

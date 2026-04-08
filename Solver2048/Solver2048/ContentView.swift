@@ -4,7 +4,6 @@ struct ContentView: View {
     @State private var speechManager = SpeechManager()
     @State private var showCalibration = false
     @State private var isCalibrated = SharedState.isCalibrated
-    @State private var solverDepth = SharedState.solverDepth
     @State private var spawnMain = SharedState.spawnMain
     @State private var showHelp = false
     @State private var isSimulating = false
@@ -173,24 +172,6 @@ struct ContentView: View {
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Solver Depth: \(solverDepth)")
-                Picker("Depth", selection: $solverDepth) {
-                    Text("2").tag(2)
-                    Text("3").tag(3)
-                    Text("4").tag(4)
-                    Text("5").tag(5)
-                    Text("6").tag(6)
-                    Text("7").tag(7)
-                }
-                .pickerStyle(.segmented)
-
-                Text(depthDescription)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .onChange(of: solverDepth) { _, v in SharedState.solverDepth = v }
-
             HStack {
                 Text("Main Spawn")
                 Spacer()
@@ -262,18 +243,6 @@ struct ContentView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 
-    private var depthDescription: String {
-        switch solverDepth {
-        case 2: return "Fast (~10ms) - quick reactions, basic strategy"
-        case 3: return "Balanced (~30ms) - good for most games"
-        case 4: return "Smart (~100ms) - stronger lookahead"
-        case 5: return "Very smart (~300ms) - deep analysis, updates ~1/sec"
-        case 6: return "Genius (~1-2s) - near-optimal play, updates every ~2s"
-        case 7: return "Super genius (~3-5s) - maximum strength, updates every ~3s"
-        default: return ""
-        }
-    }
-
 }
 
 // MARK: - Help Sheet
@@ -317,7 +286,7 @@ struct HelpSheet: View {
                 .foregroundStyle(.orange)
             Text("2048 Solver")
                 .font(.title.bold())
-            Text("Real-time AI that watches your screen and tells you the best move.")
+            Text("Real-time AI powered by expectimax search with CMA-ES optimized heuristics. Watches your screen and tells you the best move.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -354,13 +323,19 @@ struct HelpSheet: View {
         }
     }
 
-    // MARK: - Solver Settings
+    // MARK: - How the AI Works
 
     @ViewBuilder
     private var solverSettingsSection: some View {
-        helpGroup("Settings Explained", icon: "slider.horizontal.3") {
-            helpRow(icon: "brain.head.profile.fill", title: "Solver Depth",
-                    detail: "How many moves ahead the AI looks. Higher depth = smarter but slower. Depth 6 is recommended for strong play.")
+        helpGroup("How the AI Works", icon: "cpu") {
+            helpRow(icon: "brain.head.profile.fill", title: "Expectimax Search",
+                    detail: "The AI explores all possible moves, tile spawns, and counter-moves in a game tree. It picks the move with the highest expected score across all possible futures.")
+            helpRow(icon: "chart.line.uptrend.xyaxis", title: "Adaptive Depth",
+                    detail: "Search depth adjusts automatically based on board complexity. Simple boards search shallow and fast; complex late-game boards search deeper for stronger play.")
+            helpRow(icon: "function", title: "CMA-ES Heuristics",
+                    detail: "Board positions are scored using machine-learned weights optimized by evolutionary search. The heuristic evaluates monotonicity, empty space, merge potential, and tile sum — tuned for reaching the highest tiles possible.")
+            helpRow(icon: "tablecells", title: "Bitboard Engine",
+                    detail: "The board is encoded as a single 64-bit integer. Moves and scoring use precomputed lookup tables, enabling millions of board evaluations per second.")
             helpRow(icon: "leaf.fill", title: "Main Spawn",
                     detail: "Which piece spawns 90% of the time in your game. Set this to match your game's most common new tile.")
         }
@@ -376,7 +351,9 @@ struct HelpSheet: View {
             helpRow(icon: "bolt.fill", title: "PiP is the fastest output",
                     detail: "Voice has a small playback delay. For maximum speed, use only the floating arrow with voice turned off.")
             helpRow(icon: "exclamationmark.triangle.fill", title: "Follow every move",
-                    detail: "The solver plans sequences of moves. Skipping a recommendation can break the planned path and lead to a loss.")
+                    detail: "The AI plans sequences of moves. Skipping a recommendation can break the planned path and lead to a loss.")
+            helpRow(icon: "timer", title: "Response time",
+                    detail: "Most moves compute in under 50ms. Late-game positions with many distinct tiles may take slightly longer as the AI searches deeper automatically.")
         }
     }
 
