@@ -25,6 +25,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var lastSentBoard: [[Int]] = Array(repeating: Array(repeating: 0, count: 4), count: 4)
     private var frameCount: Int = 0
     private var cooldownUntilFrame: Int = 0
+    private var lastFeatureReload: Int = 0
 
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
@@ -86,6 +87,22 @@ class SampleHandler: RPBroadcastSampleHandler {
         guard sampleBufferType == .video, isSetUp else { return }
 
         frameCount += 1
+
+        // Re-read piece features every ~5 seconds (300 frames at 60fps)
+        // so newly uploaded pieces are picked up without restarting broadcast
+        if frameCount - lastFeatureReload >= 300 {
+            lastFeatureReload = frameCount
+            if let features = SharedState.readPieceFeatures(), !features.isEmpty {
+                if features.count != pieceFeatures.count {
+                    pieceFeatures = features
+                    BoardAnalyzer.resetCache()
+                    NSLog("[SolverBroadcast] Reloaded %d piece features", features.count)
+                } else {
+                    pieceFeatures = features
+                }
+            }
+        }
+
         guard frameCount >= cooldownUntilFrame else { return }
         guard frameCount % skipInterval() == 0 else { return }
 
